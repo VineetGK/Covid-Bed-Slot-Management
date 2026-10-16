@@ -9,16 +9,17 @@ from flask_login import login_required,logout_user,login_user,login_manager,Logi
 
 # from flask_mail import Mail
 import json
+import os
+import hmac
 
 
 # mydatabase connection
 local_server=True
 app=Flask(__name__)
-app.secret_key="aneesrehmankhan"
-
-
-# with open('config.json','r') as c:
-#     params=json.load(c)["params"]
+# secrets come from environment variables (see .env.example), never from source
+app.secret_key=os.environ.get("SECRET_KEY") or os.urandom(32)
+ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME")
+ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD")
 
 
 
@@ -26,8 +27,8 @@ app.secret_key="aneesrehmankhan"
 #     MAIL_SERVER='smtp.gmail.com',
 #     MAIL_PORT='465',
 #     MAIL_USE_SSL=True,
-#     MAIL_USERNAME='gmail account',
-#     MAIL_PASSWORD='gmail account password'
+#     MAIL_USERNAME=os.environ.get('MAIL_USERNAME'),
+#     MAIL_PASSWORD=os.environ.get('MAIL_PASSWORD')
 # )
 # mail = Mail(app)
 
@@ -37,8 +38,8 @@ app.secret_key="aneesrehmankhan"
 login_manager=LoginManager(app)
 login_manager.login_view='login'
 
-# app.config['SQLALCHEMY_DATABASE_URI']='mysql://username:password@localhost/databsename'
-app.config['SQLALCHEMY_DATABASE_URI']='mysql://root:@localhost/covid'
+# format: mysql://username:password@localhost/databasename
+app.config['SQLALCHEMY_DATABASE_URI']=os.environ.get('DATABASE_URL','mysql://root:@localhost/covid')
 db=SQLAlchemy(app)
 
 
@@ -155,8 +156,7 @@ def hospitallogin():
         email=request.form.get('email')
         password=request.form.get('password')
         user=Hospitaluser.query.filter_by(email=email).first()
-        #if user and check_password_hash(user.password,password):
-        if user and user.password==password:
+        if user and check_password_hash(user.password,password):
             login_user(user)
             flash("Login Success","info")
             return render_template("index.html")
@@ -173,7 +173,10 @@ def admin():
     if request.method=="POST":
         username=request.form.get('username')
         password=request.form.get('password')
-        if(username=="admin" and password=="admin"):
+        # admin login is disabled unless ADMIN_USERNAME and ADMIN_PASSWORD are set
+        if (ADMIN_USERNAME and ADMIN_PASSWORD and username and password
+                and hmac.compare_digest(username,ADMIN_USERNAME)
+                and hmac.compare_digest(password,ADMIN_PASSWORD)):
             session['user']=username
             flash("login success","info")
             return render_template("addHosUser.html")
@@ -200,14 +203,14 @@ def hospitalUser():
             hcode=request.form.get('hcode')
             email=request.form.get('email')
             password=request.form.get('password')        
-            #encpassword=generate_password_hash(password)  
-            hcode=hcode.upper()      
+            encpassword=generate_password_hash(password)
+            hcode=hcode.upper()
             emailUser=Hospitaluser.query.filter_by(email=email).first()
             if  emailUser:
                 flash("Email or srif is already taken","warning")
          
             # db.engine.execute(f"INSERT INTO `hospitaluser` (`hcode`,`email`,`password`) VALUES ('{hcode}','{email}','{encpassword}') ")
-            query=Hospitaluser(hcode=hcode,email=email,password=password)
+            query=Hospitaluser(hcode=hcode,email=email,password=encpassword)
             db.session.add(query)
             db.session.commit()
 
@@ -420,4 +423,6 @@ def slotbooking():
 
 
 
-app.run(debug=True)
+if __name__=="__main__":
+    # the Werkzeug debugger allows code execution, so only enable it explicitly
+    app.run(debug=os.environ.get("FLASK_DEBUG")=="1")
