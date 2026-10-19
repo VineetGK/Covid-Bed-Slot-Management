@@ -139,7 +139,7 @@ def login():
         srfid=request.form.get('srf')
         dob=request.form.get('dob')
         user=User.query.filter_by(srfid=srfid).first()
-        if user and user.dob=dob:
+        if user and user.dob==dob:
             login_user(user)
             flash("Login Success","info")
             return render_template("index.html")
@@ -364,58 +364,28 @@ def slotbooking():
             flash("Hospital Code not exist","warning")
             return render_template("booking.html",query=query,query1=query1)
 
-        code=hcode
-        # dbb=db.engine.execute(f"SELECT * FROM `hospitaldata` WHERE `hospitaldata`.`hcode`='{code}' ")  
-        dbb=Hospitaldata.query.filter_by(hcode=hcode).first()      
-        bedtype=bedtype
-        if bedtype=="NormalBed":       
-            for d in dbb:
-                seat=d.normalbed
-                print(seat)
-                ar=Hospitaldata.query.filter_by(hcode=code).first()
-                ar.normalbed=seat-1
-                db.session.commit()
-                
-            
-        elif bedtype=="HICUBed":      
-            for d in dbb:
-                seat=d.hicubed
-                print(seat)
-                ar=Hospitaldata.query.filter_by(hcode=code).first()
-                ar.hicubed=seat-1
-                db.session.commit()
-
-        elif bedtype=="ICUBed":     
-            for d in dbb:
-                seat=d.icubed
-                print(seat)
-                ar=Hospitaldata.query.filter_by(hcode=code).first()
-                ar.icubed=seat-1
-                db.session.commit()
-
-        elif bedtype=="VENTILATORBed": 
-            for d in dbb:
-                seat=d.vbed
-                ar=Hospitaldata.query.filter_by(hcode=code).first()
-                ar.vbed=seat-1
-                db.session.commit()
-        else:
-            pass
-
-        check=Hospitaldata.query.filter_by(hcode=hcode).first()
-        if check!=None:
-            if(seat>0 and check):
-                res=Bookingpatient(srfid=srfid,bedtype=bedtype,hcode=hcode,spo2=spo2,pname=pname,pphone=pphone,paddress=paddress)
-                db.session.add(res)
-                db.session.commit()
-                flash("Slot is Booked kindly Visit Hospital for Further Procedure","success")
-                return render_template("booking.html",query=query,query1=query1)
-            else:
-                flash("Something Went Wrong","danger")
-                return render_template("booking.html",query=query,query1=query1)
-        else:
-            flash("Give the proper hospital Code","info")
+        # map the form's bed type to the Hospitaldata column it books from
+        bedcolumns={"NormalBed":"normalbed","HICUBed":"hicubed","ICUBed":"icubed","VENTILATORBed":"vbed"}
+        column=bedcolumns.get(bedtype)
+        if column is None:
+            flash("Choose a valid bed type","warning")
             return render_template("booking.html",query=query,query1=query1)
+
+        # lock the hospital row so two bookings can't take the same last bed,
+        # then check, decrement and insert in a single transaction
+        hospital=Hospitaldata.query.filter_by(hcode=hcode).with_for_update().first()
+        seat=getattr(hospital,column) or 0
+        if seat<=0:
+            db.session.rollback()
+            flash("No beds of this type are available at this hospital","danger")
+            return render_template("booking.html",query=query,query1=query1)
+
+        setattr(hospital,column,seat-1)
+        res=Bookingpatient(srfid=srfid,bedtype=bedtype,hcode=hcode,spo2=spo2,pname=pname,pphone=pphone,paddress=paddress)
+        db.session.add(res)
+        db.session.commit()
+        flash("Slot is Booked kindly Visit Hospital for Further Procedure","success")
+        return render_template("booking.html",query=query,query1=query1)
             
     
     return render_template("booking.html",query=query,query1=query1)
